@@ -8,11 +8,13 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 //function declarations
 char* readline();
 char** parse(char* input);
 int execute(char** args);
+int makePipe(char** args1, char** args2);
 //builtin functions
 int quit(char** args);
 int cd(char** args);
@@ -29,7 +31,7 @@ char* builtins[] = {"quit", "cd", "clear", "dir", "environ", "echo", "help"};
 int (*builtinFN[])(char **) = {&quit, &cd, &clear, &dir, &environ, &echo, &help};
 
 // The main function: loop that is the shell prompt
-void main(int argc, char*argv[]) {
+int main(int argc, char*argv[]) {
   //clear screen when entering shell
   system("clear");
   //a will be the exit code/return value of any executed program or function
@@ -45,6 +47,7 @@ void main(int argc, char*argv[]) {
     a = execute(inputArray);
   }
   //system("clear");
+  return 1;
 }
 
 //read user input until user hits enter, then return that input string
@@ -119,7 +122,11 @@ int execute(char** args) {
     }
     else if(strcmp(args[i], "|") == 0) {
       //--------------------------------------------------- this is what im working on now
+      pipeLoc = i + 1;
+      args[i] = NULL;
+      ret = makePipe(&args[0], &args[i+1]);
       isPipe = 1;
+      return ret;
     }
     i++;
   } 
@@ -152,13 +159,6 @@ int execute(char** args) {
 
   //if we didn't find a builtin fn, fork and try to exec a file 
   if(isBuiltin == 0) {
-    //create a pipe
-/*
-    int fd[2];
-    if(pipe(fd) == -1) {
-      printf("Pipe error\n");
-    }
-*/
     //FORK to create child
     pid_t pid;
     pid = fork();
@@ -191,6 +191,57 @@ int execute(char** args) {
   }
   return ret;
 }
+
+/* execs two programs, passing output of first program to input of second
+*/
+int makePipe(char** args1, char** args2) {
+  pid_t pid1, pid2;
+  int fd[2];
+  //create pipe
+  pipe(fd);
+
+  //fork to exec first program
+  pid1 = fork();
+  if(pid1 < 0) {
+    printf("Error forking.\n");
+  }
+  else if(pid1 == 0) {
+    //send stdout to write end of pipe
+    dup2(fd[1], STDOUT_FILENO);
+    //close read end of pipe
+    close(fd[0]);
+    execute(args1);
+    exit(0);
+  }
+  else {
+    //returned to parent process
+
+    //fork to exe second program
+    pid2 = fork();
+    if(pid2 < 0) {
+      printf("Error forking.\n");
+    }
+    else if(pid2 == 0) {
+      //send stdin to read end of pipe
+      dup2(fd[0], STDIN_FILENO);
+      //close write end of pipe
+      close(fd[1]);
+      execute(args2);
+      exit(0);
+    }
+    else {
+      //we are in parent, wait for both child processes to finish 
+      //close the pipe in parent process
+      close(fd[0]);
+      close(fd[1]);
+      //wait for both children to finish
+      waitpid(pid1, NULL, 0);
+      waitpid(pid2, NULL, 0);
+    }
+  }
+  return 1;
+}
+
 
 //---------------------builtin functions------------------------------
 
@@ -250,15 +301,20 @@ int dir(char** args) {
   return 1;
 }
 
-/* Print current environment PATH strings
+/* Print current environment variables
 */
 int environ(char** args) {
-  const char* env = getenv("PATH");
-  if(env != NULL) {
-    printf("%s\n", env);
-  }
-  else {
-    printf("getenv() returned NULL");
+  int numVars = 7;
+  char* vars[] = {"USER", "HOME", "PATH", "SHELL", "OSTYPE", "PWD", "GROUP"};
+  int i;
+  for(i = 0; i < numVars; i++) {
+    const char* v = getenv(vars[i]);
+    if(v != NULL) {
+      printf("%s=%s\n", vars[i], v);
+    }
+    else {
+      printf("Error: Could not find environment variable %s.\n", vars[i]);
+    }
   }
   return 1;
 }
@@ -297,16 +353,28 @@ int help(char** args) {
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     int rows = w.ws_row - 1;  
     
-    char* input;
     int r = 1;
     //print first screen of readme file
+    int lastpos = 0;
+    int curpos;
+    fgets(text, len, fp);
     do {
-      fgets(text, len, fp);
       printf("%s", text);
+      //if line is longer than window is wide, we need to increment r again
+      curpos = ftell(fp);
+      int len = curpos - lastpos;
+      while(len > w.ws_col) {
+        r++;
+        len -= w.ws_col;
+      }
       r++;
+      lastpos = curpos;
     }
-    while(text != NULL && r < rows);
+    while(fgets(text, len, fp) != NULL && r < rows);
+    printf("%s", text);
+
     //now wait for user to hit enter to print next line or q to quit
+    char* input;
     while(1) {
       input = readline();
       if(strcmp(input, "q") == 0) {
@@ -317,7 +385,7 @@ int help(char** args) {
           break;
         }
         else {
-          //get rid of trailing newline then print line
+          //get rid of trailing newline if user hit enter, then print line
           strtok(text, "\n");
           printf("%s", text);
         }
@@ -326,7 +394,7 @@ int help(char** args) {
 
     printf("Reached end of help file. Press enter to return to the shell.\n");
     //wait for any key press & enter to exit the function
-    input = readline();
+    getchar();
   }
   //STDOUT isn't the terminal, so just print the whole help file and don't wait for any user input
   else {
