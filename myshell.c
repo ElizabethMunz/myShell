@@ -26,13 +26,14 @@ int (*builtinFN[])(char **) = {&quit, &cd, &clear, &dir, &environ, &echo, &help}
 
 // The main function: infinite loop that is the shell
 void main(int argc, char*argv[]) {
+  //a will be the exit code/return value of any executed program or function
   int a = 1;
-  while(a == 1) {
+  while(a != 0) {
     //get current directory to print in prompt
     char cwd[1024];
     getcwd(cwd, sizeof(cwd));
     //print prompt
-    printf("%s/myShell>", cwd);
+    printf("$myShell:~%s>", cwd);
     char* input = readline();
     char** inputArray = parse(input);
     a = execute(inputArray);
@@ -73,10 +74,12 @@ char** parse(char* input) {
 
 //based on values of args array, execute appropriate function (either builtin or external)
 int execute(char** args) {
-  int i = 0;
-  int fn;
-  pid_t pid;
 
+  int ret = 1; //returns 0 on quit, 1 otherwise
+  int isBuiltin = 0;
+  int exitStat;
+
+  pid_t pid;
   pid = fork();
   if(pid < 0) {
     printf("Error forking\n");
@@ -89,17 +92,25 @@ int execute(char** args) {
     int j;
     for(j = 0; j < 7; j++) { //j = number of builtin functions there are
       if(strcmp(args[0], builtins[j]) == 0) {
-        return(builtinFN[j])(args);
+        //set return value
+        ret = (builtinFN[j])(args);
+        isBuiltin = 1;
       }
     }
-    //input wasn't a builtin
-    printf("Command or executable not recognized.\n");
-    return 1;
-    //TODO: exec the external executable file if it exists
+    //if we didn't find a builtin fn, try to exec a file
+    if(isBuiltin == 0) {
+      execvp(args[0], args) || 1;
+      //there was no file to exec, so tell the user they're wrong
+      printf("Command or executable not recognized.\n");
+    }
+    //exit with return value
+    exit(ret);
   }
   else {
     //in parent
-    waitpid(pid, NULL, 0);
+    waitpid(pid, &exitStat, 0);
+    //printf("exit status of child: %d\n", exitStat);
+    return exitStat;
   }
 }
 
@@ -118,7 +129,7 @@ int cd(char** args) {
 }
 
 int clear(char** args) {
-  int screenHeight = 70; //hardcode a number for screenHeight b/c there's no portable way to get actual window height in C
+  int screenHeight = 100; //hardcode a number for screenHeight b/c there's no portable way to get actual window height in C
   int i;
   for(i = 0; i < screenHeight; i++) {
     printf("\n");
@@ -149,7 +160,13 @@ int dir(char** args) {
 }
 
 int environ(char** args) {
-  printf("environ\n");
+  const char* env = getenv("PATH");
+  if(env != NULL) {
+    printf("%s\n", env);
+  }
+  else {
+    printf("getenv() returned NULL");
+  }
   return 1;
 }
 
@@ -162,19 +179,20 @@ int echo(char** args) {
 int help(char** args) {
   printf("----------MYSHELL HELP----------\n How to use:  help [command]  to learn about built-in command\n--------------------------------\n");
   if(args[1] == NULL) {
-    printf("Commands:\n cd\n clear\n dir\n echo\n environ\n help\n quit\n");
+    printf(" Commands:\n  cd\n  clear\n  dir\n  echo\n  environ\n  help\n  quit\n");
+    printf(" This shell also accepts running executable files. Type the relative path of the executable and hit enter to run it.\n");
   }
   else {
     //give help for specific command
     int j;
     for(j = 0; j < 7; j++) { //j = number of builtin functions there are
       if(strcmp(args[1], builtins[j]) == 0) {
-        printf("How to use: %s\n", builtins[j]);
+        printf(" How to use: %s\n", builtins[j]);
         break;
       }
     }
-    
   }
+  printf("--------------------------------\n");
   return 1;
 }
 
