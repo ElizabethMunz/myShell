@@ -1,14 +1,24 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>
+/*********************************************************
+* AUTHOR: Elizabeth Munz
+* Created for Temple University
+*             CIS 3207
+*             Lab 2
+*             Prof. Fiore
+*             October 2017
+*/
+
 #include <dirent.h>
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <signal.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 //function declarations
 char* readline();
@@ -25,12 +35,14 @@ int echo(char** args);
 int help(char** args);
 
 #define BUFSIZE  1024
+#define NUMBUILTINS 7
 
-//list of builtin command keywords
+//list of builtin command keywords & their associated function addresses
 char* builtins[] = {"quit", "cd", "clear", "dir", "environ", "echo", "help"};
 int (*builtinFN[])(char **) = {&quit, &cd, &clear, &dir, &environ, &echo, &help};
 
-// The main function: loop that is the shell prompt
+/* The main function: loop that is the shell prompt
+*/
 int main(int argc, char*argv[]) {
   //clear screen when entering shell
   system("clear");
@@ -46,25 +58,31 @@ int main(int argc, char*argv[]) {
     char** inputArray = parse(input);
     a = execute(inputArray);
   }
-  //system("clear");
+  //clear screen on exiting shell
+  system("clear");
   return 1;
 }
 
-//read user input until user hits enter, then return that input string
+/*read user input until user hits enter, then return that input string
+*/
 char* readline() {
   char* input = malloc(sizeof(char) * BUFSIZE);
   int pos = 0;
   char c;
-  while((c = getchar()) != '\n' & c != EOF) {
+  while((c = getchar()) != '\n' && c != EOF) {
     input[pos] = c;
     pos++;
+	if(pos >= BUFSIZE - 1) {
+		printf("User input too long. Please input args less than 1024 characters.\n");
+		break;
+	}
   }
   input[pos] = '\0';
   return input;
-  //TODO: handle if input is longer than BUFSIZE, need to allocate more space to input
 }
 
-//split user input into an array of char* based on spaces
+/* split user input into an array of char* based on spaces
+*/
 char** parse(char* input) {
   int i = 0;
   char** arrayArgs = malloc(sizeof(char) * BUFSIZE);
@@ -80,26 +98,24 @@ char** parse(char* input) {
   return arrayArgs;
 }
 
-//based on values of args array, execute appropriate function (either builtin or external)
-//returns 0 if 'quit' was called, returns nonzero otherwise
+/* based on values of args array, execute appropriate function (either builtin or external)
+*  returns 0 if 'quit' was called, returns nonzero otherwise
+*/
 int execute(char** args) {
   int ret = 1; //returns 0 on quit, 1 otherwise
   int isBuiltin = 0;
   int isRedirectIn = 0;
   int isRedirectOut = 0;
   int inBg = 0;
-  int isPipe = 0;
-  int pipeLoc;
-  int exitStat, i, j;
+  int i, j;
   int stdinDup, stdoutDup, infile, outfile;
-  int fd[2];
 
   //return without executing anything if user didn't type anything
   if(args[0] == NULL) {
     return ret;
   }
 
-  //check if we need to run in background or redirect i/o
+  //check if we need to run in background, redirect i/o, or pipe (check for: & < > >> |)
   i = 0;
   while(args[i] != NULL) {
    if(strcmp(args[i], "&") == 0) {
@@ -121,18 +137,16 @@ int execute(char** args) {
       isRedirectOut = 1;
     }
     else if(strcmp(args[i], "|") == 0) {
-      //--------------------------------------------------- this is what im working on now
-      pipeLoc = i + 1;
+      //set | argument to null, then call makePipe passing args before pipe and args after pipe
       args[i] = NULL;
       ret = makePipe(&args[0], &args[i+1]);
-      isPipe = 1;
       return ret;
     }
     i++;
-  } 
+  }
 
   //check for builtin, then run matching fn if it is
-  for(j = 0; j < 7; j++) { //j = number of builtin functions there are
+  for(j = 0; j < NUMBUILTINS; j++) { 
     //check if first arg matches a builtin
     if(strcmp(args[0], builtins[j]) == 0) { 
       //save current i/o values so they can be restored later
@@ -150,9 +164,6 @@ int execute(char** args) {
       //reset stdin/out to defaults
       dup2(stdoutDup, STDOUT_FILENO);
       dup2(stdinDup, STDIN_FILENO);
-      //close files
-      //close(infile);
-      //close(outfile);
       isBuiltin = 1;
     }
   }
@@ -175,24 +186,22 @@ int execute(char** args) {
         dup2(outfile, STDOUT_FILENO);
       }
       //exec the invoked program
-      execvp(args[0], args);// || 1;
+      execvp(args[0], args);
       //there was no file to exec, so tell the user they're wrong
       printf("Command or executable not recognized.\n");
-      //exit with return value
-      exit(ret);
     }
     else {
       //in parent
       //wait for child to finish if we aren't running in bg
       if(inBg == 0) {
-        waitpid(pid, &exitStat, 0);
+        waitpid(pid, NULL, 0);
       }
     }
   }
   return ret;
 }
 
-/* execs two programs, passing output of first program to input of second
+/* execs two programs, passing output of first program (args1) to input of second (args2)
 */
 int makePipe(char** args1, char** args2) {
   pid_t pid1, pid2;
@@ -215,7 +224,6 @@ int makePipe(char** args1, char** args2) {
   }
   else {
     //returned to parent process
-
     //fork to exe second program
     pid2 = fork();
     if(pid2 < 0) {
@@ -243,7 +251,7 @@ int makePipe(char** args1, char** args2) {
 }
 
 
-//---------------------builtin functions------------------------------
+//******************************BUILTIN FUNCTIONS******************************
 
 /* quit this shell
 */
@@ -264,7 +272,6 @@ int cd(char** args) {
 /* clear the terminal screen
 */
 int clear(char** args) {
-  //system("clear"); //this function isn't portable, only works in UNIX
   //get height of window so we know how many lines to print at a time
   struct winsize w;
   ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
@@ -276,7 +283,7 @@ int clear(char** args) {
 }
 
 
-/* Print contents of current working directory
+/* Print contents of specified directory, or current working directory
 */
 int dir(char** args) {
   DIR *dir;
@@ -371,8 +378,9 @@ int help(char** args) {
       lastpos = curpos;
     }
     while(fgets(text, len, fp) != NULL && r < rows);
+    //if we haven't reached EOF yet, wait for user to hit enter
+   
     printf("%s", text);
-
     //now wait for user to hit enter to print next line or q to quit
     char* input;
     while(1) {
@@ -385,13 +393,12 @@ int help(char** args) {
           break;
         }
         else {
-          //get rid of trailing newline if user hit enter, then print line
+          //get rid of trailing newline from when user hit enter, then print line
           strtok(text, "\n");
           printf("%s", text);
         }
       }
     }
-
     printf("Reached end of help file. Press enter to return to the shell.\n");
     //wait for any key press & enter to exit the function
     getchar();
@@ -402,7 +409,6 @@ int help(char** args) {
       printf("%s", text);
     }
   }
-
   return 1;
 }
 
