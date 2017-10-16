@@ -67,8 +67,6 @@ char** parse(char* input) {
 
   while(arg != NULL) {
     arrayArgs[i] = arg;
-    //this printf just for testing purposes (to confirm args were split correctly)
-    //printf("args %d = %s\n", i, arrayArgs[i]);
     i++;
     arg = strtok(NULL, space);
   }
@@ -82,26 +80,36 @@ int execute(char** args) {
   int ret = 1; //returns 0 on quit, 1 otherwise
 
   int isBuiltin = 0;
-  int isRedirect = 0;
+  int isRedirectIn = 0;
+  int isRedirectOut = 0;
   int inBg = 0;
- 
   int exitStat, i, j;
+  int stdinDup, stdoutDup;
 
-  //check if we need to run in background   
+  //return without executing anything if user didn't type anything
+  if(args[0] == NULL) {
+    return ret;
+  }
+
+  //check if we need to run in background or redirect i/o
   i = 0;
   while(args[i] != NULL) {
     if(strcmp(args[i], "&") == 0) {
       inBg = 1;
     } 
- /*  if(strcmp(args[i], "<") == 0) {
+   if(strcmp(args[i], "<") == 0) {
       printf("redirect input to %s\n", args[i+1]);
+      stdinDup = dup(STDIN_FILENO);
+      isRedirectIn = 1;
     }
     else if(strcmp(args[i], ">") == 0) {
       printf("redirect output to %s\n", args[i+1]);
+      FILE* fp = fopen(args[i+1], "w");
+      stdoutDup = dup(STDOUT_FILENO);
     } 
     else if(strcmp(args[i], ">>") == 0) {
       printf("redirect output to %s\n", args[i+1]);
-    } */
+    }
     i++;
   } 
 
@@ -109,23 +117,11 @@ int execute(char** args) {
   for(j = 0; j < 7; j++) { //j = number of builtin functions there are
     //check if first arg matches a builtin
     if(strcmp(args[0], builtins[j]) == 0) {
-      //check if output needs redirecting
-      i = 0;
-      while(args[i] != NULL) {
-        if(strcmp(args[i], ">") == 0) {
-          //dupe then dup2
-          isRedirect = 1;
-        }
-        else if(strcmp(args[i], ">>") == 0) {
-          //dup then dup2
-          isRedirect = 1;
-        }
-        i++;
-      }    
+
       //run function and set return value
       ret = (builtinFN[j])(args);
       //reset STDOUT if we changed it
-      if(isRedirect == 1) {
+      if(isRedirectIn == 1 || isRedirectOut == 1) {
 
       }
       isBuiltin = 1;
@@ -245,6 +241,10 @@ int help(char** args) {
 
   //open readme
   FILE* fp = fopen("readme", "r");
+  if(fp == NULL) {
+    printf("Can't find readme file.\n");
+    return 1;
+  }
   //get length of readme file so array can be large enough to hold it
   fseek(fp, 0, SEEK_END);
   int len = ftell(fp);
@@ -256,10 +256,10 @@ int help(char** args) {
   //print first screen of readme file
   do {
     fgets(text, len, fp);
-    printf("%s", text);
+    printf("%s\n", text);
     r++;
   }
-  while(text != NULL && r < rows);
+  while(text != NULL && r < rows/2);
   //now wait for user to hit enter or q to print next line or quit
   while(1) {
     input = readline();
@@ -276,26 +276,6 @@ int help(char** args) {
     }
   }
 
-/*  while(text != NULL) {
-    //print the first screen-ful of help page
-    printf("%s", text);
-    while(r < rows) {
-      fgets(text, len, fp);
-      printf("%s", text);
-      r++;
-    }
-    //wait for enter cmd to read next line or q to quit
-    input = readline();
-    if(strcmp(input, "q") == 0) {
-      return 1;
-    }
-    else {
-      if(fgets(text, len, fp) == NULL) {
-        break;
-      }
-      printf("%s", text);
-    }
-  }*/
   printf("Reached end of help file. Press enter to return to the shell.\n");
   //wait for any key press & enter to exit the function
   input = readline();
