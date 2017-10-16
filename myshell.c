@@ -33,7 +33,7 @@ void main(int argc, char*argv[]) {
     char cwd[1024];
     getcwd(cwd, sizeof(cwd));
     //print prompt
-    printf("$myShell:~%s>", cwd);
+    printf("$myShell:~%s/myshell>", cwd);
     char* input = readline();
     char** inputArray = parse(input);
     a = execute(inputArray);
@@ -74,11 +74,17 @@ char** parse(char* input) {
 
 //based on values of args array, execute appropriate function (either builtin or external)
 int execute(char** args) {
-
   int ret = 1; //returns 0 on quit, 1 otherwise
   int isBuiltin = 0;
   int exitStat;
 
+  //create a pipe
+  int fd[2];
+  if(pipe(fd) == -1) {
+    printf("Pipe error\n");
+  }
+
+  //FORK to create child
   pid_t pid;
   pid = fork();
   if(pid < 0) {
@@ -87,6 +93,7 @@ int execute(char** args) {
   else if(pid == 0) {
     //in child
     //TODO: check if we need to redirect I/0 or run in background
+    
 
     //check for builtin, then run matching fn if it is
     int j;
@@ -122,9 +129,13 @@ int quit(char** args) {
 }
 
 int cd(char** args) {
+  printf("cd executed, changing to %s\n", args[1]);
   if(chdir(args[1]) != 0) {
     printf("No directory '%s' found.\n", args[1]);
   }
+  char cwd[1024];
+  getcwd(cwd, sizeof(cwd));
+  printf("current working directory: %s\n", cwd);
   return 1;
 }
 
@@ -171,7 +182,12 @@ int environ(char** args) {
 }
 
 int echo(char** args) {
-  printf("%s\n", args[1]);
+  int i = 1;
+  while(args[i] != NULL) {
+    printf("%s ", args[i]);
+    i++;
+  }
+  printf("\n");
   return 1;
 }
 
