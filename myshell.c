@@ -85,6 +85,8 @@ int execute(char** args) {
   int isRedirectIn = 0;
   int isRedirectOut = 0;
   int inBg = 0;
+  int isPipe = 0;
+  int pipeLoc;
   int exitStat, i, j;
   int stdinDup, stdoutDup, infile, outfile;
   int fd[2];
@@ -97,23 +99,27 @@ int execute(char** args) {
   //check if we need to run in background or redirect i/o
   i = 0;
   while(args[i] != NULL) {
-    if(strcmp(args[i], "&") == 0) {
+   if(strcmp(args[i], "&") == 0) {
       inBg = 1;
     } 
-   if(strcmp(args[i], "<") == 0) {
+   else if(strcmp(args[i], "<") == 0) {
       infile = open(args[i+1], O_RDONLY);
       args[i] = NULL;
       isRedirectIn = 1;
     }
     else if(strcmp(args[i], ">") == 0) {
-      outfile = open(args[i+1], O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
+      outfile = open(args[i+1], O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR | O_CLOEXEC);
       args[i] = NULL;
       isRedirectOut = 1;
     } 
     else if(strcmp(args[i], ">>") == 0) {
-      outfile = open(args[i+1], O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
+      outfile = open(args[i+1], O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR | O_CLOEXEC);
       args[i] = NULL;
       isRedirectOut = 1;
+    }
+    else if(strcmp(args[i], "|") == 0) {
+      //--------------------------------------------------- this is what im working on now
+      isPipe = 1;
     }
     i++;
   } 
@@ -122,23 +128,24 @@ int execute(char** args) {
   for(j = 0; j < 7; j++) { //j = number of builtin functions there are
     //check if first arg matches a builtin
     if(strcmp(args[0], builtins[j]) == 0) { 
-      //redirect in/out if necessary
+      //save current i/o values so they can be restored later
       stdinDup = dup(STDIN_FILENO);
       stdoutDup = dup(STDOUT_FILENO);
-
+      //redirect i/o if necessary
       if(isRedirectIn == 1) {
         dup2(infile, STDIN_FILENO);
       }
       if(isRedirectOut == 1) {
         dup2(outfile, STDOUT_FILENO);
       }
-
       //run function and set return value
       ret = (builtinFN[j])(args);
-
       //reset stdin/out to defaults
       dup2(stdoutDup, STDOUT_FILENO);
       dup2(stdinDup, STDIN_FILENO);
+      //close files
+      //close(infile);
+      //close(outfile);
       isBuiltin = 1;
     }
   }
@@ -146,11 +153,12 @@ int execute(char** args) {
   //if we didn't find a builtin fn, fork and try to exec a file 
   if(isBuiltin == 0) {
     //create a pipe
+/*
     int fd[2];
     if(pipe(fd) == -1) {
       printf("Pipe error\n");
     }
-
+*/
     //FORK to create child
     pid_t pid;
     pid = fork();
@@ -159,18 +167,15 @@ int execute(char** args) {
     }
     else if(pid == 0) {
       //in child
-
       //redirect stdin/out if needed
       if(isRedirectIn == 1) {
         dup2(infile, STDIN_FILENO);
-        printf("input redirected to %d\n", infile);
       }
       if(isRedirectOut == 1) {
         dup2(outfile, STDOUT_FILENO);
-        printf("output redirected to %d\n", outfile);
       }
       //exec the invoked program
-      execvp(args[0], args) || 1;
+      execvp(args[0], args);// || 1;
       //there was no file to exec, so tell the user they're wrong
       printf("Command or executable not recognized.\n");
       //exit with return value
@@ -182,8 +187,6 @@ int execute(char** args) {
       if(inBg == 0) {
         waitpid(pid, &exitStat, 0);
       }
-      printf("execute is returning a value of %d\n", exitStat);
-      //return exitStat;
     }
   }
   return ret;
@@ -221,6 +224,9 @@ int clear(char** args) {
   return 1;
 }
 
+
+/* Print contents of current working directory
+*/
 int dir(char** args) {
   DIR *dir;
   struct dirent *dirContents;
@@ -235,6 +241,7 @@ int dir(char** args) {
       return 1;
     }
   }
+
   while((dirContents = readdir(dir)) != NULL) {
     printf(" %s ", dirContents->d_name);
   }
